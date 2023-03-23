@@ -1,0 +1,54 @@
+const express = require('express');
+const tf = require('@tensorflow/tfjs-node');
+const moment = require('moment');
+const fs = require('fs');
+
+const app = express();
+
+app.use(express.json());
+
+// Carregar dados históricos das ordens de serviço
+const dados_ordens = fs.readFileSync('dados_ordens.json');
+const tensor_ordens = tf.tensor(JSON.parse(dados_ordens));
+
+// Separar os dados em treino e teste
+const [X_treino, y_treino] = tf.split(tensor_ordens, [3, 1], 1);
+
+// Normalizar os dados
+const [X_treino_norm, y_treino_norm, X_min, X_max, y_min, y_max] = normalizar_dados(X_treino, y_treino);
+
+// Treinar modelo de regressão linear
+const modelo = tf.sequential();
+modelo.add(tf.layers.dense({ inputShape: [3], units: 1 }));
+modelo.compile({ optimizer: 'sgd', loss: 'meanSquaredError' });
+modelo.fit(X_treino_norm, y_treino_norm, { epochs: 100 });
+
+// Rota para agendar uma nova ordem de serviço
+app.post('/agendar_ordem', (req, res) => {
+  const dados_ordem = req.body;
+
+  // Prever tempo necessário para a ordem de serviço
+  const [dia_semana, hora, tipo] = dados_ordem;
+  const tempo_necessario = prever_tempo_necessario(dia_semana, hora, tipo, modelo, X_min, X_max, y_min, y_max);
+
+  // Sugerir horários disponíveis para a ordem de serviço
+  const horarios_disponiveis = sugerir_horarios_disponiveis(tempo_necessario, dia_semana);
+
+  // Agendar ordem de serviço para o primeiro horário disponível
+  const [data, horario] = horarios_disponiveis[0];
+  const data_agendamento = moment(data + ' ' + horario, 'YYYY-MM-DD HH:mm').format('YYYY-MM-DD');
+  const horario_agendamento = moment(data + ' ' + horario, 'YYYY-MM-DD HH:mm').format('HH:mm');
+  
+  res.json({ data_agendamento, horario_agendamento });
+});
+
+// Função para prever o tempo necessário para a ordem de serviço
+function prever_tempo_necessario(dia_semana, hora, tipo, modelo, X_min, X_max, y_min, y_max) {
+  // Normalizar dados de entrada
+  const dia_semana_norm = normalizar_dia_semana(dia_semana);
+  const hora_norm = normalizar_hora(hora);
+  const tipo_norm = normalizar_tipo(tipo);
+
+  // Prever tempo necessário com o modelo treinado
+  const entrada = tf.tensor2d([[dia_semana_norm, hora_norm, tipo_norm]]);
+  const entrada_norm = normalizar_entrada(entrada, X
